@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from news.llm_service import LLMService
+from src.llm_service import LLMService
 
 
 class Command(BaseCommand):

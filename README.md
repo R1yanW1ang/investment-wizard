@@ -164,7 +164,7 @@ EMAIL_HOST_PASSWORD=your-app-password
 DEFAULT_FROM_EMAIL=your-email@gmail.com
 EMAIL_NOTIFICATION_ENABLED=True
 EMAIL_RECIPIENTS=recipient1@example.com,recipient2@example.com
-CONFIDENCE_THRESHOLD=0.8
+CONFIDENCE_THRESHOLD=0.7
 
 # LLM API Configuration
 OPENAI_API_KEY=your-openai-api-key

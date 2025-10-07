@@ -24,6 +24,7 @@ class Article(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        db_table = 'news_article'
         ordering = ['-published_at']
         indexes = [
             models.Index(fields=['source']),

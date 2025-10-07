@@ -10,8 +10,10 @@ newspaper3k==0.2.8
 lxml[html_clean]==4.9.3
 python-dotenv==1.0.0
 tiktoken==0.5.2
+openai>=1.0.0
 
 # Production packages
 gunicorn==21.2.0
 whitenoise==6.6.0
 django-celery-beat==2.5.0
+sendgrid>=6.11.0

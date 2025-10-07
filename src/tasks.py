@@ -161,7 +161,7 @@ def process_article_task(article_id):
         
         # Get model from environment variable or use default
         import os
-        model = os.getenv('LLM_MODEL', 'gpt-4.1-mini')
+        model = os.getenv('LLM_MODEL', 'gpt-5-mini')
         
         try:
             # Generate summary

@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from celery.schedules import crontab
 
 # Load environment variables
 load_dotenv()
@@ -57,7 +56,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'news',
+    'src',
 ]
 
 MIDDLEWARE = [
@@ -186,31 +185,14 @@ CELERY_TASK_ALWAYS_EAGER = False
 # Fix deprecation warnings
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
-# Celery Beat Schedule (5-minute scraping frequency)
-CELERY_BEAT_SCHEDULE = {
-    'scrape-every-5-minutes': {
-        'task': 'news.tasks.scrape_articles_task',
-        'schedule': crontab(minute='*/5'),  # Every 5 minutes
-    },
-    'cleanup-daily': {
-        'task': 'news.tasks.cleanup_old_articles_task',
-        'schedule': crontab(hour=2, minute=0),  # Daily at 2 AM
-    },
-}
-
-# Email Configuration for High-Confidence Alerts
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+# SendGrid Configuration for High-Confidence Alerts
+SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', '')
 
 # Email notification settings
 EMAIL_NOTIFICATION_ENABLED = os.getenv('EMAIL_NOTIFICATION_ENABLED', 'True').lower() == 'true'
 EMAIL_RECIPIENTS = os.getenv('EMAIL_RECIPIENTS', '').split(',')  # Comma-separated list
-CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.8'))
+CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.7'))
 
 # Logging
 LOGGING = {

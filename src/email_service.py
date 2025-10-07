@@ -1,9 +1,10 @@
 import logging
-from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from typing import Optional, List
 from .models import Article
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail, Email, To, Content
 
 logger = logging.getLogger('news')
 
@@ -14,22 +15,33 @@ class EmailNotificationService:
     def __init__(self):
         self.enabled = getattr(settings, 'EMAIL_NOTIFICATION_ENABLED', True)
         self.recipients = getattr(settings, 'EMAIL_RECIPIENTS', [])
-        self.confidence_threshold = getattr(settings, 'CONFIDENCE_THRESHOLD', 0.8)
+        self.confidence_threshold = getattr(settings, 'CONFIDENCE_THRESHOLD', 0.7)
         self.from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', '')
+        self.sendgrid_api_key = getattr(settings, 'SENDGRID_API_KEY', '')
+        self.sg_client = SendGridAPIClient(self.sendgrid_api_key) if self.sendgrid_api_key else None
+
+        logger.info(f"Email Service Initialized - Enabled: {self.enabled}, Recipients: {len(self.recipients) if self.recipients else 0}, From: {self.from_email or 'NOT SET'}, SendGrid API Key: {'SET' if self.sendgrid_api_key else 'NOT SET'}, Threshold: {self.confidence_threshold}")
     
     def should_send_notification(self, confidence_score: Optional[float]) -> bool:
         """Check if notification should be sent based on confidence score."""
         if not self.enabled:
+            logger.info(f"Email notification skipped: EMAIL_NOTIFICATION_ENABLED is False")
             return False
         
         if not self.recipients or not self.from_email:
-            logger.warning("Email notifications disabled: missing recipients or from_email")
+            logger.warning(f"Email notifications disabled: Recipients={self.recipients}, From={self.from_email or 'NOT SET'}")
             return False
         
         if confidence_score is None:
+            logger.info(f"Email notification skipped: confidence_score is None")
             return False
         
-        return confidence_score >= self.confidence_threshold
+        if confidence_score >= self.confidence_threshold:
+            logger.info(f"Email notification WILL be sent: confidence_score ({confidence_score}) >= threshold ({self.confidence_threshold})")
+            return True
+        else:
+            logger.info(f"Email notification skipped: confidence_score ({confidence_score}) < threshold ({self.confidence_threshold})")
+            return False
     
     def send_high_confidence_alert(self, article: Article) -> bool:
         """Send email notification for high-confidence investment suggestion."""
@@ -53,15 +65,32 @@ class EmailNotificationService:
             # HTML version
             html_message = self._create_html_message(context)
             
-            # Send email
-            result = send_mail(
-                subject=subject,
-                message=message,
-                from_email=self.from_email,
-                recipient_list=self.recipients,
-                html_message=html_message,
-                fail_silently=False,
-            )
+            # Send email using SendGrid
+            if not self.sg_client:
+                logger.error('SendGrid client not initialized - missing API key')
+                return False
+            
+            try:
+                # Create SendGrid mail object
+                from_email = Email(self.from_email)
+                to_emails = [To(email) for email in self.recipients]
+                plain_text_content = Content('text/plain', message)
+                html_content = Content('text/html', html_message)
+                
+                mail = Mail(
+                    from_email=from_email,
+                    to_emails=to_emails,
+                    subject=subject,
+                    plain_text_content=plain_text_content,
+                    html_content=html_content
+                )
+                
+                # Send the email
+                response = self.sg_client.send(mail)
+                result = response.status_code in [200, 201, 202]
+            except Exception as sendgrid_error:
+                logger.error(f'SendGrid API error: {str(sendgrid_error)}')
+                return False
             
             if result:
                 logger.info(f"High-confidence alert sent for article {article.id} (confidence: {article.confidence_score})")
@@ -176,13 +205,25 @@ Confidence threshold: {self.confidence_threshold * 100}%
             return False
         
         try:
-            send_mail(
-                subject="Investment Wizard - Email Configuration Test",
-                message="This is a test email to verify your email configuration is working correctly.",
-                from_email=self.from_email,
-                recipient_list=self.recipients,
-                fail_silently=False,
+            if not self.sg_client:
+                logger.error('SendGrid client not initialized - missing API key')
+                return False
+            
+            # Create test email using SendGrid
+            from_email = Email(self.from_email)
+            to_emails = [To(email) for email in self.recipients]
+            plain_text_content = Content('text/plain', 'This is a test email to verify your email configuration is working correctly.')
+            
+            mail = Mail(
+                from_email=from_email,
+                to_emails=to_emails,
+                subject='Investment Wizard - Email Configuration Test',
+                plain_text_content=plain_text_content
             )
+            
+            # Send the test email
+            response = self.sg_client.send(mail)
+            result = response.status_code in [200, 201, 202]
             logger.info("Test email sent successfully")
             return True
         except Exception as e:

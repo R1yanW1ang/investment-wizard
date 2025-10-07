@@ -1,7 +1,6 @@
 import os
 import sys
 import django
-import requests
 import logging
 import hashlib
 import json
@@ -9,8 +8,7 @@ import tiktoken
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from django.core.cache import cache
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from openai import OpenAI
 
 logger = logging.getLogger('news')
 
@@ -19,8 +17,10 @@ class LLMService:
     
     def __init__(self):
         self.api_key = os.getenv('OPENAI_API_KEY')
-        self.api_url = os.getenv('LLM_API_URL', 'https://api.openai.com/v1/chat/completions')
         self.cache_timeout = 86400  # 24 hours in seconds
+        
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=self.api_key) if self.api_key else None
         
         # Pricing information per 1M tokens (from the pricing table)
         self.pricing = {
@@ -30,11 +30,11 @@ class LLMService:
             'gpt-5-chat-latest': {'input': 1.25, 'cached_input': 0.125, 'output': 10.00},
             'gpt-5-codex': {'input': 1.25, 'cached_input': 0.125, 'output': 10.00},
             'gpt-4.1': {'input': 2.00, 'cached_input': 0.50, 'output': 8.00},
-            'gpt-4.1-mini': {'input': 0.40, 'cached_input': 0.10, 'output': 1.60}
+            'gpt-4o-mini': {'input': 0.40, 'cached_input': 0.10, 'output': 1.60}
         }
         
         # Default model (can be overridden per call)
-        self.default_model = 'gpt-4.1-mini'
+        self.default_model = 'gpt-5-mini'
         
         # Initialize tokenizer for token counting
         try:
@@ -43,26 +43,6 @@ class LLMService:
             logger.warning(f"Could not initialize tokenizer for {self.default_model}: {e}")
             # Fallback to cl100k_base encoding (used by GPT-4)
             self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        
-        # Setup session with connection pooling for better async performance
-        self.session = requests.Session()
-        
-        # Configure retry strategy
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-        )
-        
-        # Mount adapter with retry strategy
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,  # Number of connection pools
-            pool_maxsize=20,      # Maximum number of connections in pool
-        )
-        
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
     
     def _count_tokens(self, text: str) -> int:
         """Count tokens in the given text."""
@@ -79,8 +59,8 @@ class LLMService:
             model = self.default_model
         
         if model not in self.pricing:
-            logger.warning(f"Unknown model {model}, using gpt-4.1-mini pricing")
-            model = 'gpt-4.1-mini'
+            logger.warning(f"Unknown model {model}, using gpt-5-mini pricing")
+            model = 'gpt-5-mini'
         
         pricing = self.pricing[model]
         
@@ -303,82 +283,46 @@ Respond ONLY in valid JSON:
             return result
     
     def _call_llm_api(self, prompt: str, task_type: str, model: str = None) -> Optional[str]:
-        """Make API call to LLM service."""
-        if not self.api_key:
+        """Make API call to LLM service using OpenAI SDK."""
+        if not self.client:
             logger.warning("No API key provided, using placeholder response")
             return self._get_placeholder_response(task_type)
         
         try:
-            headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
-            }
-            
-            # Prepare messages for token counting
+            # Prepare the full input with system message
             system_message = 'You are a financial analyst providing investment insights based on news articles.'
-            messages = [
-                {'role': 'system', 'content': system_message},
-                {'role': 'user', 'content': prompt}
-            ]
+            full_input = f"{system_message}\n\n{prompt}"
             
             # Count input tokens
-            input_text = system_message + prompt
-            input_tokens = self._count_tokens(input_text)
+            input_tokens = self._count_tokens(full_input)
             
             # Use provided model or default
             selected_model = model or self.default_model
             
-            data = {
-                'model': selected_model,
-                'messages': messages,
-                'max_tokens': 300,
-                'temperature': 0.1
-            }
-            
-            response = self.session.post(
-                self.api_url,
-                headers=headers,
-                json=data,
-                timeout=30
+            # Call OpenAI responses API
+            response = self.client.responses.create(
+                model=selected_model,
+                input=full_input,
+                reasoning={"effort": "medium"},
+                text={"verbosity": "low"}
             )
             
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Validate API response structure
-                if not self._validate_api_response(result):
-                    logger.error(f"Invalid API response structure: {result}")
-                    return self._get_placeholder_response(task_type)
-                
-                response_content = result['choices'][0]['message']['content'].strip()
-                
-                # Count output tokens and calculate cost
-                output_tokens = self._count_tokens(response_content)
-                cost_info = self._calculate_cost(input_tokens, output_tokens, selected_model)
-                
-                # Log the cost
-                self._log_cost(cost_info, task_type)
-                
-                return response_content
-            else:
-                logger.error(f"LLM API error: {response.status_code} - {response.text}")
-                return self._get_placeholder_response(task_type)
+            # Extract the output text
+            response_content = response.output_text.strip()
+            
+            # Count output tokens and calculate cost
+            output_tokens = self._count_tokens(response_content)
+            cost_info = self._calculate_cost(input_tokens, output_tokens, selected_model)
+            
+            # Log the cost
+            self._log_cost(cost_info, task_type)
+            
+            return response_content
         
         except Exception as e:
             logger.error(f"Error calling LLM API: {str(e)}")
             return self._get_placeholder_response(task_type)
     
-    def _validate_api_response(self, response: Dict) -> bool:
-        """Validate that the API response has the expected structure."""
-        try:
-            return (
-                'choices' in response and 
-                len(response['choices']) > 0 and
-                'message' in response['choices'][0] and
-                'content' in response['choices'][0]['message']
-            )
-        except (KeyError, TypeError, IndexError):
-            return False
     
     def _get_placeholder_response(self, task_type: str) -> str:
         """Generate placeholder response when API is not available."""
@@ -434,12 +378,13 @@ Respond ONLY in valid JSON:
         return self._calculate_cost(input_tokens, output_tokens, model)
     
     def close_session(self):
-        """Close the HTTP session to free up resources."""
+        """Close the client session to free up resources."""
         try:
-            self.session.close()
-            logger.debug("LLM service session closed")
+            if self.client:
+                self.client.close()
+                logger.debug("LLM service client closed")
         except Exception as e:
-            logger.warning(f"Error closing LLM service session: {str(e)}")
+            logger.warning(f"Error closing LLM service client: {str(e)}")
 
 
 if __name__ == "__main__":
@@ -451,7 +396,6 @@ if __name__ == "__main__":
     # Clear cache before testing (since you improved the prompt)
     print("Clearing old LLM cache...")
     llm_service = LLMService()
-    llm_service.clear_llm_cache()
     
     # test prompt for confidence score 
     print("Testing with fresh LLM responses...")
@@ -476,5 +420,5 @@ AMD has been investing heavily in recent years in the market for so-called accel
 AMD's chief financial officer Jean Hu added that the deal is “expected to deliver tens of billions of dollars in revenue” for the company.
     """
 
-    result = llm_service.generate_investment_suggestion(content, summary, model="gpt-4.1-mini")
+    result = llm_service.generate_investment_suggestion(content, summary, model="gpt-5-mini")
     print(result)
