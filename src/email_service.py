@@ -157,7 +157,7 @@ Confidence threshold: {self.confidence_threshold * 100}%
                 body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                 .header {{ background-color: {confidence_color}; color: white; padding: 20px; text-align: center; }}
                 .content {{ padding: 20px; }}
-                .confidence {{ font-size: 24px; font-weight: bold; color: {confidence_color}; }}
+                .confidence {{ font-size: 24px; font-weight: bold; color: white; }}
                 .article-title {{ font-size: 18px; font-weight: bold; margin: 15px 0; }}
                 .summary, .suggestion {{ background-color: #f5f5f5; padding: 15px; margin: 10px 0; border-left: 4px solid {confidence_color}; }}
                 .footer {{ background-color: #f0f0f0; padding: 15px; text-align: center; font-size: 12px; color: #666; }}
